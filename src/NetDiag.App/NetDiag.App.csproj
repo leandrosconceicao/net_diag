@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>NetDiag</AssemblyName>
+    <RootNamespace>NetDiag.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Product>NetDiag — Diagnóstico de Conexão</Product>
+    <Version>0.1.0</Version>
+    <ApplicationIcon>Assets\netdiag.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NetDiag.Core\NetDiag.Core.csproj" />
+  </ItemGroup>
+
+</Project>
