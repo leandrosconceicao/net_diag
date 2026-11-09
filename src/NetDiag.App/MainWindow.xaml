@@ -18,6 +18,25 @@
 
         <!-- Cabeçalho -->
         <StackPanel Grid.Row="0" Margin="0,0,0,16">
+            <!-- Aviso de nova versão -->
+            <Border Background="{StaticResource AccentSoftBrush}" CornerRadius="8" Padding="14,10" Margin="0,0,0,14"
+                    Visibility="{Binding HasUpdate, Converter={StaticResource BoolToVis}}">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button Content="Agora não" Style="{StaticResource SecondaryButton}"
+                                Background="{StaticResource CardBrush}" Margin="8,0,0,0"
+                                Command="{Binding DismissUpdateCommand}" />
+                        <Button Content="Novidades" Style="{StaticResource SecondaryButton}"
+                                Background="{StaticResource CardBrush}" Margin="8,0,0,0"
+                                Command="{Binding OpenReleaseNotesCommand}" />
+                        <Button Content="Atualizar agora" Style="{StaticResource PrimaryButton}" Padding="16,8"
+                                Margin="8,0,0,0" Command="{Binding UpdateNowCommand}" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding UpdateBannerText}" VerticalAlignment="Center" TextWrapping="Wrap"
+                               FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" />
+                </DockPanel>
+            </Border>
+
             <TextBlock Text="Diagnóstico de Conexão" FontSize="26" FontWeight="SemiBold" />
             <TextBlock Text="Descubra por que a internet está lenta ou caindo — e onde está o problema."
                        Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" />
@@ -195,6 +214,14 @@
                         Command="{Binding CopySummaryCommand}" />
                 <Button Content="Salvar relatório" Style="{StaticResource SecondaryButton}"
                         Command="{Binding SaveReportCommand}" />
+            </StackPanel>
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,0">
+                <TextBlock Text="{Binding VersionText}" FontSize="12" Foreground="{StaticResource MutedBrush}" />
+                <TextBlock FontSize="12" Foreground="{StaticResource MutedBrush}"
+                           Visibility="{Binding UpdatesSupported, Converter={StaticResource BoolToVis}}">
+                    <Run Text=" · " /><Hyperlink Command="{Binding CheckUpdatesCommand}"
+                                                 Foreground="{StaticResource AccentBrush}">Verificar atualizações</Hyperlink>
+                </TextBlock>
             </StackPanel>
             <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                        Foreground="{StaticResource MutedBrush}" />

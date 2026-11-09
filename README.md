@@ -22,6 +22,31 @@ dotnet publish src/NetDiag.App -c Release -r win-x64 --self-contained true `
 
 O executável fica em `publish/NetDiag.exe`.
 
+## Publicar uma versão
+
+```powershell
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+A tag dispara `.github/workflows/release.yml`, que roda os testes, publica o exe com a versão da tag e cria um release no GitHub com `NetDiag.exe` e `NetDiag.exe.sha256`.
+
+## Atualização automática
+
+Ao abrir, o NetDiag consulta o último release do GitHub (no máximo uma vez por dia; o botão "Verificar atualizações" no rodapé força a consulta). Se houver versão nova, uma faixa no topo oferece "Atualizar agora":
+
+1. O exe novo é baixado para `NetDiag.exe.new`, ao lado do atual.
+2. O SHA-256 é conferido com o `NetDiag.exe.sha256` do release; se não bater, nada é alterado.
+3. O exe atual vira `NetDiag.exe.old`, o novo assume o nome `NetDiag.exe` e o programa reinicia. O `.old` é apagado na abertura seguinte.
+
+Detalhes:
+- Não exige administrador. Se a pasta do exe não permitir gravação (ex.: `Program Files`), o app abre a página do release para download manual.
+- O botão fica desabilitado durante um diagnóstico.
+- Sem internet ou com a API do GitHub indisponível, nenhum aviso aparece.
+- Rodando com `dotnet run`, a atualização fica desligada (só o exe publicado se atualiza).
+- Quem tem uma versão anterior ao atualizador precisa baixar a primeira versão com atualizador manualmente uma vez.
+- O hash protege contra download corrompido, não contra um release adulterado. Assinar o exe (Authenticode) é o próximo passo de segurança.
+
 ## Como o diagnóstico funciona
 
 Os testes rodam **de dentro para fora**. Comparar uma camada com a anterior é o que permite separar problema local de problema do provedor.

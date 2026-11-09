@@ -2,18 +2,30 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Net.Http;
 using System.Text;
 using System.Windows;
 using System.Windows.Input;
 using Microsoft.Win32;
+using NetDiag.App.Services;
 using NetDiag.Core;
 using NetDiag.Core.Model;
 using NetDiag.Core.Reporting;
+using NetDiag.Core.Updates;
 
 namespace NetDiag.App.ViewModels;
 
 public sealed class MainViewModel : ObservableObject
 {
+    private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(24);
+    private static readonly HttpClient ApiClient = new() { Timeout = TimeSpan.FromSeconds(15) };
+    private static readonly HttpClient DownloadClient = new() { Timeout = TimeSpan.FromMinutes(10) };
+
+    private readonly Version _currentVersion = AppVersion.Current(typeof(MainViewModel).Assembly);
+    private UpdateInfo? _availableUpdate;
+    private bool _updateDismissed;
+    private bool _isUpdating;
+
     private CancellationTokenSource? _cts;
     private DiagnosticReport? _report;
     private bool _isRunning;
@@ -25,13 +37,27 @@ public sealed class MainViewModel : ObservableObject
 
     public MainViewModel()
     {
-        RunCommand = new AsyncRelayCommand(RunAsync, () => !IsRunning);
+        RunCommand = new AsyncRelayCommand(RunAsync, () => !IsRunning && !IsUpdating);
         CancelCommand = new RelayCommand(() => _cts?.Cancel(), () => IsRunning);
         SaveReportCommand = new RelayCommand(SaveReport, () => Report is not null && !IsRunning);
         CopySummaryCommand = new RelayCommand(CopySummary, () => Report is not null && !IsRunning);
 
+        UpdateNowCommand = new AsyncRelayCommand(UpdateNowAsync,
+            () => AvailableUpdate is not null && !IsRunning && !IsUpdating);
+        CheckUpdatesCommand = new AsyncRelayCommand(() => CheckForUpdatesAsync(manual: true),
+            () => UpdatesSupported && !IsUpdating);
+        OpenReleaseNotesCommand = new RelayCommand(
+            () => OpenUrl(AvailableUpdate!.ReleasePage), () => AvailableUpdate is not null);
+        DismissUpdateCommand = new RelayCommand(() =>
+        {
+            _updateDismissed = true;
+            OnPropertyChanged(nameof(HasUpdate));
+        });
+
         foreach (var check in DiagnosticRunner.CreateDefault().Checks)
             Steps.Add(new StepViewModel(check.Id, check.Name, check.Description));
+
+        _ = CheckForUpdatesAsync(manual: false);
     }
 
     public ObservableCollection<StepViewModel> Steps { get; } = new();
@@ -42,6 +68,42 @@ public sealed class MainViewModel : ObservableObject
     public ICommand CancelCommand { get; }
     public ICommand SaveReportCommand { get; }
     public ICommand CopySummaryCommand { get; }
+    public ICommand UpdateNowCommand { get; }
+    public ICommand CheckUpdatesCommand { get; }
+    public ICommand OpenReleaseNotesCommand { get; }
+    public ICommand DismissUpdateCommand { get; }
+
+    // ───────────── Atualização ─────────────
+
+    public bool UpdatesSupported => UpdateEnvironment.IsSupported;
+    public string VersionText => $"Versão {_currentVersion}";
+
+    public UpdateInfo? AvailableUpdate
+    {
+        get => _availableUpdate;
+        private set
+        {
+            if (!Set(ref _availableUpdate, value)) return;
+            OnPropertyChanged(nameof(HasUpdate));
+            OnPropertyChanged(nameof(UpdateBannerText));
+            CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    public bool HasUpdate => AvailableUpdate is not null && !_updateDismissed;
+
+    public string UpdateBannerText => AvailableUpdate is null
+        ? ""
+        : $"Nova versão {AvailableUpdate.Version} disponível (você está na {_currentVersion}).";
+
+    public bool IsUpdating
+    {
+        get => _isUpdating;
+        private set
+        {
+            if (Set(ref _isUpdating, value)) CommandManager.InvalidateRequerySuggested();
+        }
+    }
 
     public string PlaceholderText =>
         "Clique em \"Diagnosticar\" para começar. O teste leva cerca de 40 segundos. " +
@@ -215,6 +277,86 @@ public sealed class MainViewModel : ObservableObject
         catch (Exception ex)
         {
             StatusText = "Não foi possível salvar: " + ex.Message;
+        }
+    }
+
+    /// <summary>Automática: no máximo uma vez por dia e em silêncio. Manual: sempre, com retorno na barra de status.</summary>
+    private async Task CheckForUpdatesAsync(bool manual)
+    {
+        if (!UpdatesSupported) return;
+        if (!manual && !UpdateEnvironment.IsCheckDue(UpdateCheckInterval)) return;
+
+        if (manual) StatusText = "Procurando atualizações…";
+        try
+        {
+            var update = await new UpdateChecker(ApiClient).CheckAsync(_currentVersion);
+            UpdateEnvironment.MarkChecked();
+
+            if (update is null)
+            {
+                if (manual) StatusText = $"Nenhuma versão nova encontrada (você está na {_currentVersion}).";
+                return;
+            }
+
+            _updateDismissed = false;
+            AvailableUpdate = update;
+            if (manual) StatusText = UpdateBannerText;
+        }
+        catch (Exception ex)
+        {
+            if (manual) StatusText = "Não foi possível procurar atualizações: " + ex.Message;
+        }
+    }
+
+    private async Task UpdateNowAsync()
+    {
+        var update = AvailableUpdate;
+        var exe = Environment.ProcessPath;
+        if (update is null || exe is null) return;
+
+        // Sem permissão de escrita na pasta do exe (ex.: Program Files): download manual.
+        if (!UpdateInstaller.CanWriteTo(Path.GetDirectoryName(exe)!))
+        {
+            StatusText = "Sem permissão para atualizar nesta pasta. Abrindo a página de download…";
+            OpenUrl(update.ReleasePage);
+            return;
+        }
+
+        IsUpdating = true;
+        StatusText = $"Baixando a versão {update.Version}…";
+        try
+        {
+            var progress = new Progress<double>(p => StatusText = $"Baixando a versão {update.Version}… {p:P0}");
+            await new UpdateInstaller(DownloadClient).InstallAsync(update, exe, progress, CancellationToken.None);
+
+            StatusText = "Reiniciando na nova versão…";
+            try
+            {
+                Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false });
+            }
+            catch
+            {
+                UpdateInstaller.Revert(exe);
+                throw;
+            }
+            Application.Current.Shutdown();
+        }
+        catch (Exception ex)
+        {
+            StatusText = "Não foi possível atualizar: " + ex.Message;
+            IsUpdating = false;
+        }
+    }
+
+    private void OpenUrl(Uri url)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(url.AbsoluteUri) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Não foi possível abrir o navegador. Acesse: {url.AbsoluteUri} ({ex.Message})";
         }
     }
 

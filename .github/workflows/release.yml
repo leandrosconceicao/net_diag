@@ -1,0 +1,56 @@
+# Publica uma versão a cada tag "v*" (ex.: git tag v0.2.0 && git push origin v0.2.0).
+# O release contém NetDiag.exe e NetDiag.exe.sha256, que o atualizador do app usa.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - uses: actions/setup-dotnet@v4.3.1
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Testes
+        run: dotnet test tests/NetDiag.Core.Tests -c Release
+
+      - name: Versão a partir da tag
+        id: version
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          if ($version -notmatch '^\d+\.\d+(\.\d+)?$') {
+            throw "A tag '${{ github.ref_name }}' não é uma versão no formato vX.Y.Z."
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Publicar exe
+        run: >
+          dotnet publish src/NetDiag.App -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:Version=${{ steps.version.outputs.version }}
+          -o publish
+
+      - name: Gerar checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash publish/NetDiag.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -Path publish/NetDiag.exe.sha256 -Value "$hash  NetDiag.exe" -Encoding ascii -NoNewline
+
+      - name: Criar release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${{ github.ref_name }}"
+          publish/NetDiag.exe publish/NetDiag.exe.sha256
+          --title "NetDiag ${{ github.ref_name }}"
+          --generate-notes
